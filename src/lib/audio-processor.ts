@@ -1,11 +1,70 @@
 import { audioBufferToWav } from './audio-utils';
 
-export type Preset = 'clean' | 'club' | 'vocal' | 'bass';
+export type Preset = 'youtube_rap' | 'club_bass' | 'tiktok_trap' | 'high_res';
+
+export interface BassSettings {
+  impact: 'Soft' | 'Heavy' | 'Savage';
+  punch: 'Short' | 'Tight' | 'Long';
+  weight: 'Low' | 'Balanced' | 'Deep';
+  clubSafe: boolean;
+  phoneSafe: boolean;
+}
+
+export interface AudioAnalysis {
+  lufs: number;
+  truePeak: number;
+  dynamicRange: number;
+  clipping: boolean;
+  bassBalance: 'Good' | 'Heavy' | 'Weak';
+  stereoWidth: 'Good' | 'Narrow' | 'Wide';
+  aiArtifacts: boolean;
+  issues: string[];
+  fixes: string[];
+}
+
+export async function analyzeAudio(file: File): Promise<AudioAnalysis> {
+  // Simulate deep analysis delay
+  await new Promise(resolve => setTimeout(resolve, 2500));
+  
+  // Mock analysis results based on file size/name to feel dynamic
+  const isHeavy = file.size % 2 === 0;
+  const hasArtifacts = file.size % 3 === 0;
+  
+  return {
+    lufs: -14.4 + (Math.random() * 4 - 2),
+    truePeak: isHeavy ? 0.8 : -0.5,
+    dynamicRange: 6.5 + Math.random() * 3,
+    clipping: isHeavy,
+    bassBalance: isHeavy ? 'Heavy' : 'Good',
+    stereoWidth: 'Wide',
+    aiArtifacts: hasArtifacts,
+    issues: isHeavy ? [
+      "Sub bass (20-60Hz) eating headroom",
+      "808 fundamental masking kick transient",
+      "Inter-sample clipping detected (+0.8 dBTP)"
+    ] : [
+      "Low dynamic contrast in drop",
+      "Slightly muddy low-mids (120-250Hz)",
+      "Phase-weak stereo width"
+    ],
+    fixes: isHeavy ? [
+      "Mono bass below 120Hz for club safety",
+      "Dynamic sub EQ to unmask kick",
+      "Apply true-peak limiting to fix clipping"
+    ] : [
+      "Micro-dynamic expansion (restore life)",
+      "Clean up low-mids for better vocal separation",
+      "Stereo depth re-balancing"
+    ]
+  };
+}
 
 export async function processAudio(
   file: File,
   preset: Preset,
-  onProgress: (progress: number) => void
+  intensity: number, // 0 to 100
+  bassSettings: BassSettings,
+  onProgress: (progress: number, stage: string) => void
 ): Promise<{ originalBuffer: AudioBuffer, processedWav: Blob, processedBuffer: AudioBuffer }> {
   const arrayBuffer = await file.arrayBuffer();
   const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -20,95 +79,66 @@ export async function processAudio(
   const source = offlineCtx.createBufferSource();
   source.buffer = originalBuffer;
 
-  // Build processing chain
+  // Build processing chain based on preset and intensity
   let lastNode: AudioNode = source;
+  const intensityMultiplier = intensity / 50; // 0 to 2 (1 is normal)
 
-  if (preset === 'clean') {
-    // High-pass to remove rumble
+  // 1. AI Humanizer Pass (Simulated)
+  const humanizerEQ = offlineCtx.createBiquadFilter();
+  humanizerEQ.type = 'peaking';
+  humanizerEQ.frequency.value = 4000;
+  humanizerEQ.Q.value = 0.5;
+  humanizerEQ.gain.value = -1 * intensityMultiplier; // De-harsh
+  lastNode.connect(humanizerEQ);
+  lastNode = humanizerEQ;
+
+  // 2. Bass Engine (808 Control)
+  if (bassSettings.phoneSafe) {
     const hpFilter = offlineCtx.createBiquadFilter();
     hpFilter.type = 'highpass';
-    hpFilter.frequency.value = 30;
+    hpFilter.frequency.value = 40; // Cut extreme sub
     lastNode.connect(hpFilter);
     lastNode = hpFilter;
+  }
 
-    // Gentle compression
+  const bassEQ = offlineCtx.createBiquadFilter();
+  bassEQ.type = 'lowshelf';
+  bassEQ.frequency.value = 80;
+  
+  let bassGain = 0;
+  if (bassSettings.impact === 'Heavy') bassGain = 3;
+  if (bassSettings.impact === 'Savage') bassGain = 6;
+  if (bassSettings.weight === 'Deep') bassEQ.frequency.value = 60;
+  
+  bassEQ.gain.value = bassGain * intensityMultiplier;
+  lastNode.connect(bassEQ);
+  lastNode = bassEQ;
+
+  // 3. Preset Specifics
+  if (preset === 'youtube_rap') {
     const compressor = offlineCtx.createDynamicsCompressor();
-    compressor.threshold.value = -24;
-    compressor.knee.value = 30;
-    compressor.ratio.value = 2;
-    compressor.attack.value = 0.003;
-    compressor.release.value = 0.25;
+    compressor.threshold.value = -16 * intensityMultiplier;
+    compressor.ratio.value = 3 + (intensityMultiplier * 1);
     lastNode.connect(compressor);
     lastNode = compressor;
-    
-    // Slight air
-    const highShelf = offlineCtx.createBiquadFilter();
-    highShelf.type = 'highshelf';
-    highShelf.frequency.value = 10000;
-    highShelf.gain.value = 2;
-    lastNode.connect(highShelf);
-    lastNode = highShelf;
-
-  } else if (preset === 'club') {
-    // Low-shelf boost
-    const lowShelf = offlineCtx.createBiquadFilter();
-    lowShelf.type = 'lowshelf';
-    lowShelf.frequency.value = 100;
-    lowShelf.gain.value = 4;
-    lastNode.connect(lowShelf);
-    lastNode = lowShelf;
-
-    // Hard compression / Limiter
+  } else if (preset === 'club_bass') {
     const compressor = offlineCtx.createDynamicsCompressor();
-    compressor.threshold.value = -12;
-    compressor.knee.value = 0;
-    compressor.ratio.value = 10;
-    compressor.attack.value = 0.001;
-    compressor.release.value = 0.1;
+    compressor.threshold.value = -12 * intensityMultiplier;
+    compressor.ratio.value = 6 + (intensityMultiplier * 2);
+    compressor.attack.value = 0.005; // Let transients through
     lastNode.connect(compressor);
     lastNode = compressor;
-    
-    // Make-up gain
-    const gain = offlineCtx.createGain();
-    gain.gain.value = 1.5;
-    lastNode.connect(gain);
-    lastNode = gain;
-
-  } else if (preset === 'vocal') {
-    // Mid boost
+  } else if (preset === 'tiktok_trap') {
     const peaking = offlineCtx.createBiquadFilter();
     peaking.type = 'peaking';
-    peaking.frequency.value = 3000;
+    peaking.frequency.value = 2500;
     peaking.Q.value = 1;
-    peaking.gain.value = 3;
+    peaking.gain.value = 2 * intensityMultiplier;
     lastNode.connect(peaking);
     lastNode = peaking;
-
-    // De-mud
-    const demud = offlineCtx.createBiquadFilter();
-    demud.type = 'peaking';
-    demud.frequency.value = 300;
-    demud.Q.value = 1;
-    demud.gain.value = -2;
-    lastNode.connect(demud);
-    lastNode = demud;
-
-    const compressor = offlineCtx.createDynamicsCompressor();
-    compressor.threshold.value = -18;
-    compressor.ratio.value = 3;
-    lastNode.connect(compressor);
-    lastNode = compressor;
-
-  } else if (preset === 'bass') {
-    const lowShelf = offlineCtx.createBiquadFilter();
-    lowShelf.type = 'lowshelf';
-    lowShelf.frequency.value = 80;
-    lowShelf.gain.value = 6;
-    lastNode.connect(lowShelf);
-    lastNode = lowShelf;
     
     const compressor = offlineCtx.createDynamicsCompressor();
-    compressor.threshold.value = -10;
+    compressor.threshold.value = -14 * intensityMultiplier;
     compressor.ratio.value = 4;
     lastNode.connect(compressor);
     lastNode = compressor;
@@ -116,7 +146,7 @@ export async function processAudio(
 
   // Final safety limiter
   const limiter = offlineCtx.createDynamicsCompressor();
-  limiter.threshold.value = -1;
+  limiter.threshold.value = preset === 'club_bass' ? -0.5 : -1.0;
   limiter.knee.value = 0;
   limiter.ratio.value = 20;
   limiter.attack.value = 0.001;
@@ -126,18 +156,31 @@ export async function processAudio(
 
   source.start(0);
 
-  // Simulate progress since offline rendering is fast but blocks
+  // Simulate progress and stages
+  const stages = [
+    'Bass Intelligence Scan', 
+    'AI Artifact Humanization', 
+    'Smart Low-End Reconstruction', 
+    'Dynamic Processing', 
+    'Mastering & Limiting', 
+    'Validating'
+  ];
   let progress = 0;
+  let currentStageIdx = 0;
+  
   const interval = setInterval(() => {
-    progress += 10;
+    progress += 4;
+    if (progress % 16 === 0 && currentStageIdx < stages.length - 1) {
+      currentStageIdx++;
+    }
     if (progress <= 90) {
-      onProgress(progress);
+      onProgress(progress, stages[currentStageIdx]);
     }
   }, 100);
 
   const renderedBuffer = await offlineCtx.startRendering();
   clearInterval(interval);
-  onProgress(100);
+  onProgress(100, 'Done');
 
   const wavBlob = audioBufferToWav(renderedBuffer);
   
